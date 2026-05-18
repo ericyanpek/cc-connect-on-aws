@@ -323,6 +323,30 @@ aws ssm send-command --region us-east-1 --document-name AWS-RunShellScript \
   --query 'Command.CommandId' --output text
 ```
 
+## EC2 上的工作目录约定（个人经验）
+
+部署完之后 EC2 上的活儿会越攒越多，下面是我自己跑下来一周左右磨出来的几条规则，跟 cc-connect 本身无关，但跟「**让飞书里指挥 Claude Code 不至于把目录搞乱**」直接相关：
+
+```
+~/workspaces/
+├── research/<YYYY-MM-topic>/   # 调研、读 repo、记笔记。一次性、不 git init
+│   ├── 2026-05-aws-redshift-remote-mcp/
+│   ├── ...
+│   └── INDEX.md                # 每个调研一行摘要，问"我调研过啥"先读这个
+├── projects/<repo>/            # 真开发，子目录名 1:1 对齐 GitHub repo 名
+│   ├── cc-connect/             # gh repo clone 上游
+│   └── cc-connect-aws/         # 本仓库
+└── my-project/                 # cc-connect 默认 work_dir，AI 别往这写
+```
+
+几条非显而易见的：
+
+- **research 子目录强制 `YYYY-MM-` 前缀**，按时间扫一眼就知道在做什么；跨调研合成的目录反过来用纯语义名（如 `eric-side-projects-portfolio/`），故意不带日期，把"事件"和"主题"分开。
+- **research 子目录不 `git init`**，明确 disposable；要 commit 的活只在 `projects/` 下做。
+- **`research/INDEX.md` 是唯一索引入口**，每加一个调研就追加一行；让 AI 回答"调研过什么"时**先读 INDEX.md，不要 `ls research/`**——`ls` 拿不到一句话摘要。
+- **目录意图通过 memory 显式喂给 AI agent**：开发任务路由到 `projects/<repo>/`、调研任务路由到 `research/<date-topic>/`，让飞书里"帮我调研下 X"这种模糊指令不用每次解释。
+- `my-project/` 是 cc-connect daemon 的 `work_dir`，会被 cron / 附件落盘等机制写入；除非你明确指示，否则**别让 AI 把开发活塞这里**。
+
 ## 参考
 
 - [cc-connect 项目](https://github.com/chenhg5/cc-connect)
