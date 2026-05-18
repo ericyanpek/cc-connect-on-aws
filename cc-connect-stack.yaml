@@ -1,6 +1,17 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: cc-connect on EC2 with Bedrock API key, accessed via SSM Session Manager (no inbound ports).
 
+# IMPORTANT: Before deploying this stack, create the Bedrock API key SSM parameter
+# yourself (CloudFormation cannot create SecureString parameters):
+#
+#   aws ssm put-parameter \
+#     --name /cc-connect/bedrock-api-key \
+#     --value "<your bedrock api key>" \
+#     --type SecureString \
+#     --region us-east-1
+#
+# The instance role below grants read access to that parameter by ARN.
+
 Parameters:
   InstanceType:
     Type: String
@@ -30,15 +41,6 @@ Parameters:
     Description: Public subnet in the chosen VPC
 
 Resources:
-
-  BedrockApiKeyParam:
-    Type: AWS::SSM::Parameter
-    Properties:
-      Name: /cc-connect/bedrock-api-key
-      Type: String
-      Value: REPLACE_ME_AFTER_DEPLOY
-      Description: Bedrock long-term API key consumed by Claude Code (AWS_BEARER_TOKEN_BEDROCK).
-      Tier: Standard
 
   InstanceRole:
     Type: AWS::IAM::Role
@@ -120,7 +122,9 @@ Resources:
             --region ${AWS::Region} \
             --query Parameter.Value --output text || echo REPLACE_ME_AFTER_DEPLOY)"
 
-          # /etc/profile.d for interactive shells
+          # /etc/profile.d for interactive shells. Restrict to root + ec2-user via group
+          # because the file embeds AWS_BEARER_TOKEN_BEDROCK; other local accounts (if any
+          # are ever added) shouldn't be able to read the token by tailing this file.
           cat >/etc/profile.d/cc-connect.sh <<EOF
           export CLAUDE_CODE_USE_BEDROCK=1
           export AWS_REGION=${BedrockRegion}
@@ -128,7 +132,8 @@ Resources:
           export ANTHROPIC_MODEL=${AnthropicModel}
           export ANTHROPIC_SMALL_FAST_MODEL=${AnthropicSmallFastModel}
           EOF
-          chmod 644 /etc/profile.d/cc-connect.sh
+          chown root:ec2-user /etc/profile.d/cc-connect.sh
+          chmod 640 /etc/profile.d/cc-connect.sh
 
           # systemd EnvironmentFile so the cc-connect.service (and Claude Code
           # subprocess) inherit Bedrock credentials without an interactive shell.
@@ -168,5 +173,5 @@ Outputs:
     Description: Command to open a Session Manager shell from your laptop
     Value: !Sub aws ssm start-session --target ${Instance} --region ${AWS::Region}
   ParamName:
-    Description: SSM parameter that holds the Bedrock API key
-    Value: !Ref BedrockApiKeyParam
+    Description: SSM parameter that holds the Bedrock API key (must be created out-of-band as SecureString)
+    Value: /cc-connect/bedrock-api-key

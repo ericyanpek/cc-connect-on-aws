@@ -22,12 +22,25 @@ echo "Admin/allow open_id: $ADMIN_OPEN_ID"
 REMOTE=$(cat <<REMOTE_EOF
 set -euo pipefail
 ADMIN="$ADMIN_OPEN_ID"
+CONFIG=/home/ec2-user/.cc-connect/config.toml
+
+if [[ ! -f "\$CONFIG" ]]; then
+  echo "ERROR: \$CONFIG not found. Run setup-feishu.sh first." >&2
+  exit 1
+fi
 
 # Fetch app credentials from current config so we can rewrite cleanly.
-APP_ID=\$(sudo -u ec2-user grep '^app_id' /home/ec2-user/.cc-connect/config.toml | head -1 | cut -d'"' -f2)
-APP_SECRET=\$(sudo -u ec2-user grep '^app_secret' /home/ec2-user/.cc-connect/config.toml | head -1 | cut -d'"' -f2)
+# This grep|cut is intentionally fragile — it only handles the simple form
+# 'app_id = "..."' that setup-feishu.sh writes. If the parse returns empty,
+# we hard-fail rather than overwrite config with empty Feishu creds.
+APP_ID=\$(sudo -u ec2-user grep '^app_id' "\$CONFIG" | head -1 | cut -d'"' -f2)
+APP_SECRET=\$(sudo -u ec2-user grep '^app_secret' "\$CONFIG" | head -1 | cut -d'"' -f2)
+if [[ -z "\$APP_ID" || -z "\$APP_SECRET" ]]; then
+  echo "ERROR: failed to parse app_id/app_secret from \$CONFIG. Refusing to rewrite config with empty Feishu credentials." >&2
+  echo "Hint: re-run ./setup-feishu.sh <app_id> <app_secret> to restore a known-good config." >&2
+  exit 1
+fi
 
-CONFIG=/home/ec2-user/.cc-connect/config.toml
 sudo -u ec2-user cp "\$CONFIG" "\$CONFIG.bak.\$(date +%s)"
 
 sudo -u ec2-user tee "\$CONFIG" >/dev/null <<TOML
@@ -49,12 +62,18 @@ mode = "default"
 provider = "bedrock"
 model = "us.anthropic.claude-opus-4-7"
 
-# Bedrock provider - inherits AWS_BEARER_TOKEN_BEDROCK from systemd EnvironmentFile
+# Bedrock provider. AWS_BEARER_TOKEN_BEDROCK is intentionally NOT listed here —
+# cc-connect's systemd unit (cc-connect.service) loads /etc/cc-connect.env via
+# EnvironmentFile=, which puts the token in the daemon's process env. The Claude
+# Code subprocess inherits it from there. Putting the token in this file would
+# leak a long-term credential into config.toml (mode 0600 ec2-user, but still
+# more places than necessary). Don't add it here.
 [[projects.agent.providers]]
 name = "bedrock"
 env = { CLAUDE_CODE_USE_BEDROCK = "1", AWS_REGION = "${REGION}" }
 
 # Verified-on-this-account model whitelist. Aliases used in /model switch.
+# Keep this list in sync with set-model.sh's ALLOWED_MODELS array.
 [[projects.agent.providers.models]]
 model = "us.anthropic.claude-opus-4-7"
 alias = "opus47"

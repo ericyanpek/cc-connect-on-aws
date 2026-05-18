@@ -11,9 +11,40 @@
 # claude-code for cheap helper calls.
 set -euo pipefail
 
+# Whitelist of known-good Bedrock inference profile IDs. Keep this in sync with
+# configure-models-and-admin.sh — both files must list the same set of model IDs,
+# otherwise /model switch (in Feishu) and ./set-model.sh (CLI) will drift apart.
+ALLOWED_MODELS=(
+  "us.anthropic.claude-opus-4-7"
+  "us.anthropic.claude-opus-4-6-v1"
+  "us.anthropic.claude-opus-4-5-20251101-v1:0"
+  "us.anthropic.claude-opus-4-1-20250805-v1:0"
+  "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+  "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+)
+
+is_allowed() {
+  local needle="$1"
+  for m in "${ALLOWED_MODELS[@]}"; do
+    [[ "$m" == "$needle" ]] && return 0
+  done
+  return 1
+}
+
 REGION="${AWS_REGION:-us-east-1}"
 MODEL="${1:-us.anthropic.claude-opus-4-7}"
 SMALL_FAST="${2:-us.anthropic.claude-haiku-4-5-20251001-v1:0}"
+
+if ! is_allowed "$MODEL"; then
+  echo "ERROR: model '$MODEL' is not in the whitelist. Allowed:" >&2
+  printf '  %s\n' "${ALLOWED_MODELS[@]}" >&2
+  exit 1
+fi
+if ! is_allowed "$SMALL_FAST"; then
+  echo "ERROR: small/fast model '$SMALL_FAST' is not in the whitelist. Allowed:" >&2
+  printf '  %s\n' "${ALLOWED_MODELS[@]}" >&2
+  exit 1
+fi
 
 INSTANCE_ID="$(aws cloudformation describe-stacks \
   --stack-name cc-connect --region "$REGION" \

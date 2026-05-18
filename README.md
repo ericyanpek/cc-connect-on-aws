@@ -61,7 +61,19 @@
 
 ## 部署流程
 
-### 1. 部署基础设施
+### 1. 先写入 Bedrock API key（**必须在部署栈之前**）
+
+CloudFormation 不能创建 `SecureString` 类型的 SSM Parameter，所以 Bedrock 长期 key 要先手工 put 进去。EC2 启动时 user-data 会读这个参数；如果跳过这一步直接部署，user-data 拉不到 key，service 起不来。
+
+```bash
+aws ssm put-parameter \
+  --name /cc-connect/bedrock-api-key \
+  --value "你的 Bedrock API key" \
+  --type SecureString \
+  --region us-east-1
+```
+
+### 2. 部署基础设施
 
 ```bash
 # 取默认 VPC 和一个默认子网
@@ -81,18 +93,7 @@ aws cloudformation deploy \
 
 栈创建后会输出 `InstanceId`、连接命令、SSM 参数名。
 
-### 2. 写入 Bedrock API key
-
-把 SSM 参数升级成 SecureString 并写入真实 key：
-
-```bash
-aws ssm put-parameter \
-  --name /cc-connect/bedrock-api-key \
-  --value "你的 Bedrock API key" \
-  --type SecureString \
-  --overwrite \
-  --region us-east-1
-```
+> ⚠️ **user-data 只在 EC2 首次 boot 执行**。如果以后用 `aws cloudformation deploy` 升级栈，模板里的 `npm install -g cc-connect` 等命令不会重跑；想升级 cc-connect 或 Claude Code，请通过 SSM Run-Command 在已运行的实例上执行 `npm install -g cc-connect@latest`。
 
 ### 3. 同步本地 GitHub 配置到 EC2
 

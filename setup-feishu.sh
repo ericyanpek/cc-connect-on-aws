@@ -57,8 +57,11 @@ REGION="${REGION}"
 PROJECT="${PROJECT}"
 
 # Refresh Bedrock env file in case the API key changed since first boot.
+# /etc/cc-connect.env is what systemd reads via EnvironmentFile; /etc/profile.d/cc-connect.sh
+# is only for interactive shells. Update both so they stay in sync.
 API_KEY=\$(aws ssm get-parameter --name /cc-connect/bedrock-api-key --with-decryption --region "\$REGION" --query Parameter.Value --output text)
-sed -i "s|^export AWS_BEARER_TOKEN_BEDROCK=.*|export AWS_BEARER_TOKEN_BEDROCK=\"\$API_KEY\"|" /etc/profile.d/cc-connect.sh
+sudo sed -i "s|^AWS_BEARER_TOKEN_BEDROCK=.*|AWS_BEARER_TOKEN_BEDROCK=\$API_KEY|" /etc/cc-connect.env
+sudo sed -i "s|^export AWS_BEARER_TOKEN_BEDROCK=.*|export AWS_BEARER_TOKEN_BEDROCK=\"\$API_KEY\"|" /etc/profile.d/cc-connect.sh
 
 APP=\$(aws ssm get-parameter --name /cc-connect/feishu/app --with-decryption --region "\$REGION" --query Parameter.Value --output text)
 APP_ID=\${APP%%:*}
