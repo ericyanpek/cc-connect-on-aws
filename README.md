@@ -4,9 +4,11 @@
 
 把 [cc-connect](https://github.com/chenhg5/cc-connect) 部署到 AWS EC2，用飞书机器人远程操作 Claude Code，模型走 Amazon Bedrock。
 
-<!-- 演示 GIF：飞书里跟 bot 对话的实录，建议 10-20s，<5MB -->
-<!-- 图位放这里效果最强：访客打开 README 第一眼就看到产品长什么样 -->
-![飞书对话演示](docs/images/demo-feishu-chat.gif)
+<p align="center">
+  <img src="docs/images/demo-feishu-chat-keyboard.gif" width="300" alt="飞书对话演示 - 输入" />
+  &nbsp;&nbsp;
+  <img src="docs/images/demo-feishu-chat-empty.gif" width="300" alt="飞书对话演示 - 会话" />
+</p>
 
 - ☁️ EC2 + 默认 VPC，t3.large
 - 🔒 无入站端口（通过 SSM Session Manager 运维）
@@ -17,7 +19,6 @@
 
 ## 架构
 
-<!-- 用 excalidraw 或 draw.io 画一张，导出 SVG 或 PNG 放这里。AWS 图标库可在 draw.io More Shapes 里加载。 -->
 ![架构图](docs/images/architecture.svg)
 
 <details>
@@ -40,10 +41,6 @@
 - 在目标区域（默认 `us-east-1`）的 Bedrock 控制台已申请并通过 Claude Sonnet/Haiku 的 model access
 - 一个 Bedrock 长期 API key（[官方文档](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys-generate.html)）
 - 飞书自建应用：拿到 `app_id` 和 `app_secret`，开启机器人能力，订阅 `im.message.receive_v1` 和 `card.action.trigger`，发布版本（详见 [docs/feishu.md](https://github.com/chenhg5/cc-connect/blob/main/docs/feishu.md)）
-
-<!-- 飞书后台配置截图位 — 这是最容易卡住的环节，强烈建议放图： -->
-<!-- ![飞书后台 - 事件订阅](docs/images/feishu-app-events.png) -->
-<!-- ![飞书后台 - 权限管理](docs/images/feishu-app-permissions.png) -->
 - 本地有 GitHub SSH key（`~/.ssh/id_ed25519`），并已加入 GitHub 账号
 
 ## 文件清单
@@ -197,9 +194,6 @@ sudo -u ec2-user -H bash -lc 'cc-connect daemon restart'
 /model switch sonnet45
 ```
 
-<!-- /model switch 演示 GIF，5-10s 即可 -->
-<!-- ![模型切换演示](docs/images/demo-model-switch.gif) -->
-
 切换后对话历史保留，下一轮回复立即用新模型。白名单外的别名 cc-connect 会直接拒绝，**不会发到 Bedrock 触发 400**。
 
 > ⚠️ alias 只是 `/model switch` 的查表 key。`config.toml` 里 `[projects.agent.options].model` 的默认值必须写完整 ID（如 `us.anthropic.claude-opus-4-7`），写 alias 会被原样塞给 Bedrock 触发 `400 invalid model identifier`。`configure-models-and-admin.sh` 已经按这个规则写好了。
@@ -296,34 +290,6 @@ aws ssm send-command --region us-east-1 --document-name AWS-RunShellScript \
   --parameters 'commands=["sudo -u ec2-user tail -50 /home/ec2-user/.cc-connect/logs/cc-connect.log"]' \
   --query 'Command.CommandId' --output text
 ```
-
-<!--
-======================================================================
-README 图片资产清单（仅维护者可见，HTML 注释不会渲染）
-
-需要放到 docs/images/ 的图：
-
-  P0（强烈建议补）
-  - demo-feishu-chat.gif       飞书里跟 bot 对话实录，10-20s，<5MB
-  - feishu-app-events.png      飞书后台「事件订阅」截图（脱敏 app_id 等）
-  - feishu-app-permissions.png 飞书后台「权限管理」截图
-  - architecture.svg           架构图（excalidraw 或 draw.io 画，替换当前 ASCII）
-
-  P1（锦上添花）
-  - demo-model-switch.gif      /model switch 演示，5-10s
-  - demo-deploy.gif            部署成功的 cloudformation deploy 输出（asciinema 录最方便）
-
-  P2
-  - whoami-screenshot.png      飞书里给 bot 发 /whoami 拿 open_id 的步骤
-
-录制工具建议：
-  - GIF：macOS Cmd+Shift+5 录 mp4 → Gifski 转 GIF
-  - 终端：asciinema rec → asciinema-gif
-  - 架构图：excalidraw.com（手绘风快）/ draw.io（专业 AWS 图标）
-
-记得：所有图都裁掉/打码敏感信息（app_id、open_id、对话内容）
-======================================================================
--->
 
 ## 参考
 
