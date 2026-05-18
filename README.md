@@ -6,12 +6,12 @@
 
 <table align="center">
   <tr>
-    <td align="center"><img src="docs/images/demo-feishu-chat-empty.gif" width="300" alt="通过飞书 Bot 进行交互" /></td>
-    <td align="center"><img src="docs/images/demo-feishu-chat-keyboard.gif" width="300" alt="通过交互式操作更改 model" /></td>
+    <td align="center"><img src="docs/images/demo-feishu-chat-empty.gif" width="300" alt="通过飞书 Bot 与 Claude Code 交互" /></td>
+    <td align="center"><img src="docs/images/demo-feishu-chat-keyboard.gif" width="300" alt="用 /model 卡片在 Bedrock 模型间切换" /></td>
   </tr>
   <tr>
-    <td align="center"><sub>demo 通过飞书 Bot 进行交互</sub></td>
-    <td align="center"><sub>demo 通过交互式操作更改 model 防止 crush</sub></td>
+    <td align="center"><sub>飞书里跟 Claude Code 对话</sub></td>
+    <td align="center"><sub>用 cc-connect 自带的 <code>/model</code> 卡片在 Bedrock 模型间切换<br/>（白名单 alias 由本仓库脚本写入 config.toml）</sub></td>
   </tr>
 </table>
 
@@ -191,6 +191,8 @@ sudo -u ec2-user -H bash -lc 'cc-connect daemon restart'
 
 ### 切换 Claude 模型
 
+`/model` 命令是 cc-connect 上游自带的功能，本仓库做的是**给它喂一份 Bedrock 模型白名单**——具体做法见下文「Bedrock 模型适配是怎么对接上原生 `/model` 的」。
+
 **飞书里切（推荐）**
 
 ```
@@ -201,7 +203,32 @@ sudo -u ec2-user -H bash -lc 'cc-connect daemon restart'
 
 切换后对话历史保留，下一轮回复立即用新模型。白名单外的别名 cc-connect 会直接拒绝，**不会发到 Bedrock 触发 400**。
 
-> ⚠️ alias 只是 `/model switch` 的查表 key。`config.toml` 里 `[projects.agent.options].model` 的默认值必须写完整 ID（如 `us.anthropic.claude-opus-4-7`），写 alias 会被原样塞给 Bedrock 触发 `400 invalid model identifier`。`configure-models-and-admin.sh` 已经按这个规则写好了。
+#### Bedrock 模型适配是怎么对接上原生 `/model` 的
+
+cc-connect 的 `/model` 命令默认会按这个优先级取候选模型：
+
+1. `config.toml` 里 `[[projects.agent.providers.models]]` 配置的列表（`AvailableModels` 优先返回）
+2. 失败 → 调 `https://api.anthropic.com/v1/models`（Bedrock 路径根本不通）
+3. 再失败 → 内置默认（sonnet / opus / haiku 等通用别名，Bedrock 不认）
+
+所以本仓库的 `configure-models-and-admin.sh` 做的事情就是把 6 个**已在该 AWS 账号下通过 Bedrock model access 的模型**写进第 ① 段，每个 alias 对应一个 Bedrock 完整 ID：
+
+```toml
+[[projects.agent.providers.models]]
+model = "us.anthropic.claude-opus-4-7"
+alias = "opus47"
+
+[[projects.agent.providers.models]]
+model = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+alias = "sonnet45"
+# ... 共 6 条
+```
+
+用户输入 `/model switch opus46` 时，上游 `resolveModelSwitchTarget` 走 alias 全等匹配 → 替换成完整 ID → `SetModel(...)` → 下一轮 Claude CLI 用 `--model us.anthropic.claude-opus-4-6-v1` 调 Bedrock。
+
+顺带，脚本里设了 `admin_from = "<你的 open_id>"`，这是 cc-connect 原生的权限位，作用是**只让 admin 用 `/model`、`/provider` 这类敏感命令**——避免群里其他人切走你的模型。
+
+> ⚠️ alias 只是 `/model switch` 的查表 key。`config.toml` 里 `[projects.agent.options].model` 的**启动默认值必须写完整 Bedrock ID**（如 `us.anthropic.claude-opus-4-7`），因为这一项不走 alias 解析、会被原样塞给 Claude CLI，进而触发 Bedrock `400 invalid model identifier`。`configure-models-and-admin.sh` 已经按这个规则写好了。
 
 **命令行切（不进飞书）**
 
