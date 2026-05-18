@@ -1,0 +1,178 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: cc-connect on EC2 with Bedrock API key, accessed via SSM Session Manager (no inbound ports).
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t3.large
+    Description: EC2 instance type
+  VolumeSizeGiB:
+    Type: Number
+    Default: 30
+    Description: Root EBS volume size in GiB
+  BedrockRegion:
+    Type: String
+    Default: us-east-1
+    Description: AWS region used by Claude Code to call Bedrock
+  AnthropicModel:
+    Type: String
+    Default: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+    Description: Bedrock inference profile / model ID for Claude Code
+  AnthropicSmallFastModel:
+    Type: String
+    Default: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    Description: Bedrock model ID used by Claude Code for small/fast tasks
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to deploy into (use the default VPC)
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet in the chosen VPC
+
+Mappings:
+  # Amazon Linux 2023 x86_64 SSM parameter resolves the latest AMI per region
+  RegionMap:
+    us-east-1:
+      AL2023AMI: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+
+Resources:
+
+  BedrockApiKeyParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /cc-connect/bedrock-api-key
+      Type: String
+      Value: REPLACE_ME_AFTER_DEPLOY
+      Description: Bedrock long-term API key consumed by Claude Code (AWS_BEARER_TOKEN_BEDROCK).
+      Tier: Standard
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: ReadBedrockApiKeyParam
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cc-connect/bedrock-api-key
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref InstanceRole
+
+  InstanceSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: cc-connect host - no inbound, all outbound
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound (Bedrock, Feishu WS, GitHub, npm)
+      # SecurityGroupIngress intentionally omitted = no inbound rules
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !FindInMap [RegionMap, !Ref AWS::Region, AL2023AMI]
+      IamInstanceProfile: !Ref InstanceProfile
+      SecurityGroupIds:
+        - !Ref InstanceSG
+      SubnetId: !Ref SubnetId
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: !Ref VolumeSizeGiB
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: cc-connect
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          exec > >(tee -a /var/log/cc-connect-userdata.log) 2>&1
+
+          # 1. Install Node.js 20, git, jq
+          curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+          dnf install -y nodejs git jq
+
+          # 2. Install Claude Code and cc-connect globally
+          npm install -g @anthropic-ai/claude-code
+          npm install -g cc-connect
+
+          # 3. Pull Bedrock API key from SSM and write env file
+          API_KEY="$(aws ssm get-parameter \
+            --name /cc-connect/bedrock-api-key \
+            --with-decryption \
+            --region ${AWS::Region} \
+            --query Parameter.Value --output text || echo REPLACE_ME_AFTER_DEPLOY)"
+
+          # /etc/profile.d for interactive shells
+          cat >/etc/profile.d/cc-connect.sh <<EOF
+          export CLAUDE_CODE_USE_BEDROCK=1
+          export AWS_REGION=${BedrockRegion}
+          export AWS_BEARER_TOKEN_BEDROCK="$API_KEY"
+          export ANTHROPIC_MODEL=${AnthropicModel}
+          export ANTHROPIC_SMALL_FAST_MODEL=${AnthropicSmallFastModel}
+          EOF
+          chmod 644 /etc/profile.d/cc-connect.sh
+
+          # systemd EnvironmentFile so the cc-connect.service (and Claude Code
+          # subprocess) inherit Bedrock credentials without an interactive shell.
+          cat >/etc/cc-connect.env <<EOF
+          CLAUDE_CODE_USE_BEDROCK=1
+          AWS_REGION=${BedrockRegion}
+          AWS_BEARER_TOKEN_BEDROCK=$API_KEY
+          ANTHROPIC_MODEL=${AnthropicModel}
+          ANTHROPIC_SMALL_FAST_MODEL=${AnthropicSmallFastModel}
+          EOF
+          chmod 600 /etc/cc-connect.env
+          setfacl -m u:ec2-user:r /etc/cc-connect.env
+
+          # Drop-in extending cc-connect.service (created later by `cc-connect daemon install`)
+          sudo -u ec2-user mkdir -p /home/ec2-user/.config/systemd/user/cc-connect.service.d
+          cat >/home/ec2-user/.config/systemd/user/cc-connect.service.d/env.conf <<'EOF'
+          [Service]
+          EnvironmentFile=/etc/cc-connect.env
+          EOF
+          chown -R ec2-user:ec2-user /home/ec2-user/.config
+
+          # 4. Prep ec2-user workspace dirs
+          sudo -u ec2-user mkdir -p /home/ec2-user/.cc-connect
+          sudo -u ec2-user mkdir -p /home/ec2-user/workspaces
+
+          # 5. Enable systemd user lingering so cc-connect daemon stays up
+          #    even when no interactive ec2-user session is logged in.
+          loginctl enable-linger ec2-user
+
+          echo "cc-connect host bootstrap complete"
+
+Outputs:
+  InstanceId:
+    Description: EC2 instance ID (use this with SSM Session Manager)
+    Value: !Ref Instance
+  ConnectCommand:
+    Description: Command to open a Session Manager shell from your laptop
+    Value: !Sub aws ssm start-session --target ${Instance} --region ${AWS::Region}
+  ParamName:
+    Description: SSM parameter that holds the Bedrock API key
+    Value: !Ref BedrockApiKeyParam

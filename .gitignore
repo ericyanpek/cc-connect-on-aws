@@ -1,0 +1,15 @@
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local artifacts (anything that might contain secrets)
+*.local
+*.env
+*.log
+.env
+.env.*
+
+# CloudFormation packaged artifacts (if you ever use `aws cloudformation package`)
+packaged-*.yaml
