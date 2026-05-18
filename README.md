@@ -4,11 +4,16 @@
 
 把 [cc-connect](https://github.com/chenhg5/cc-connect) 部署到 AWS EC2，用飞书机器人远程操作 Claude Code，模型走 Amazon Bedrock。
 
-<p align="center">
-  <img src="docs/images/demo-feishu-chat-keyboard.gif" width="300" alt="飞书对话演示 - 输入" />
-  &nbsp;&nbsp;
-  <img src="docs/images/demo-feishu-chat-empty.gif" width="300" alt="飞书对话演示 - 会话" />
-</p>
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/images/demo-feishu-chat-empty.gif" width="300" alt="通过飞书 Bot 进行交互" /></td>
+    <td align="center"><img src="docs/images/demo-feishu-chat-keyboard.gif" width="300" alt="通过交互式操作更改 model" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>demo 通过飞书 Bot 进行交互</sub></td>
+    <td align="center"><sub>demo 通过交互式操作更改 model 防止 crush</sub></td>
+  </tr>
+</table>
 
 - ☁️ EC2 + 默认 VPC，t3.large
 - 🔒 无入站端口（通过 SSM Session Manager 运维）
