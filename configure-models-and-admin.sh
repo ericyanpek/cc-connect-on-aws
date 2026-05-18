@@ -52,7 +52,7 @@ model = "us.anthropic.claude-opus-4-7"
 # Bedrock provider - inherits AWS_BEARER_TOKEN_BEDROCK from systemd EnvironmentFile
 [[projects.agent.providers]]
 name = "bedrock"
-env = { CLAUDE_CODE_USE_BEDROCK = "1", AWS_REGION = "us-east-1" }
+env = { CLAUDE_CODE_USE_BEDROCK = "1", AWS_REGION = "${REGION}" }
 
 # Verified-on-this-account model whitelist. Aliases used in /model switch.
 [[projects.agent.providers.models]]

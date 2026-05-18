@@ -3,7 +3,7 @@
 # Usage: ./setup-feishu.sh <app_id> <app_secret> [project_name]
 set -euo pipefail
 
-REGION="us-east-1"
+REGION="${AWS_REGION:-us-east-1}"
 STACK_NAME="cc-connect"
 APP_ID="${1:?usage: setup-feishu.sh <app_id> <app_secret> [project]}"
 APP_SECRET="${2:?missing app_secret}"
@@ -53,7 +53,7 @@ sleep 5
 # Build remote script as a single quoted string (no nested heredoc).
 REMOTE=$(cat <<REMOTE_EOF
 set -euo pipefail
-REGION="us-east-1"
+REGION="${REGION}"
 PROJECT="${PROJECT}"
 
 # Refresh Bedrock env file in case the API key changed since first boot.

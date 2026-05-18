@@ -11,7 +11,7 @@
 # claude-code for cheap helper calls.
 set -euo pipefail
 
-REGION="us-east-1"
+REGION="${AWS_REGION:-us-east-1}"
 MODEL="${1:-us.anthropic.claude-opus-4-7}"
 SMALL_FAST="${2:-us.anthropic.claude-haiku-4-5-20251001-v1:0}"
 

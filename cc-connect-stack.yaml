@@ -29,12 +29,6 @@ Parameters:
     Type: AWS::EC2::Subnet::Id
     Description: Public subnet in the chosen VPC
 
-Mappings:
-  # Amazon Linux 2023 x86_64 SSM parameter resolves the latest AMI per region
-  RegionMap:
-    us-east-1:
-      AL2023AMI: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
-
 Resources:
 
   BedrockApiKeyParam:
@@ -90,7 +84,7 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: !Ref InstanceType
-      ImageId: !FindInMap [RegionMap, !Ref AWS::Region, AL2023AMI]
+      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
       IamInstanceProfile: !Ref InstanceProfile
       SecurityGroupIds:
         - !Ref InstanceSG

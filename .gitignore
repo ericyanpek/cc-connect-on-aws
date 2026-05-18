@@ -11,5 +11,22 @@
 .env
 .env.*
 
+# Private keys / certs — never commit
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+known_hosts
+
 # CloudFormation packaged artifacts (if you ever use `aws cloudformation package`)
 packaged-*.yaml
+
+# Build / dependency artifacts (if scripts grow into something more)
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/

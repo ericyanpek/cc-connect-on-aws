@@ -3,7 +3,7 @@
 # Code (a subprocess) sees AWS_BEARER_TOKEN_BEDROCK and friends.
 set -euo pipefail
 
-REGION="us-east-1"
+REGION="${AWS_REGION:-us-east-1}"
 INSTANCE_ID="$(aws cloudformation describe-stacks \
   --stack-name cc-connect --region "$REGION" \
   --query "Stacks[0].Outputs[?OutputKey=='InstanceId'].OutputValue" \
@@ -12,14 +12,14 @@ echo "Target: $INSTANCE_ID"
 
 REMOTE=$(cat <<'REMOTE_EOF'
 set -euo pipefail
-REGION="us-east-1"
+REGION="__REGION__"
 
 API_KEY=$(aws ssm get-parameter --name /cc-connect/bedrock-api-key --with-decryption --region "$REGION" --query Parameter.Value --output text)
 
 # systemd EnvironmentFile expects KEY=VALUE without "export" and without quotes.
 sudo tee /etc/cc-connect.env >/dev/null <<EOF
 CLAUDE_CODE_USE_BEDROCK=1
-AWS_REGION=us-east-1
+AWS_REGION=__REGION__
 AWS_BEARER_TOKEN_BEDROCK=$API_KEY
 ANTHROPIC_MODEL=us.anthropic.claude-sonnet-4-5-20250929-v1:0
 ANTHROPIC_SMALL_FAST_MODEL=us.anthropic.claude-haiku-4-5-20251001-v1:0
@@ -55,6 +55,7 @@ sudo -u ec2-user -H bash -lc '
 REMOTE_EOF
 )
 
+REMOTE="${REMOTE//__REGION__/$REGION}"
 ENCODED=$(printf '%s' "$REMOTE" | base64)
 CMD_ID=$(aws ssm send-command --region "$REGION" \
   --document-name AWS-RunShellScript \

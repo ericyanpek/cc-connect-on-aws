@@ -11,7 +11,7 @@
 # Usage: ./sync-github-config.sh
 set -euo pipefail
 
-REGION="us-east-1"
+REGION="${AWS_REGION:-us-east-1}"
 STACK_NAME="cc-connect"
 
 INSTANCE_ID="$(aws cloudformation describe-stacks \
@@ -85,7 +85,7 @@ aws iam put-role-policy --role-name "$ROLE_NAME" \
 sleep 5
 
 REMOTE_SCRIPT='set -euo pipefail
-REGION="us-east-1"
+REGION="__REGION__"
 USER_HOME=/home/ec2-user
 
 PRIV=$(aws ssm get-parameter --name /cc-connect/github/ssh-private-key --with-decryption --region "$REGION" --query Parameter.Value --output text)
@@ -127,7 +127,8 @@ sudo -u ec2-user git config --global init.defaultBranch main
 # Verify
 sudo -u ec2-user ssh -o StrictHostKeyChecking=accept-new -T git@github.com 2>&1 || true'
 
-# Encode script to avoid quoting hell.
+# Substitute REGION placeholder, then encode to avoid quoting hell.
+REMOTE_SCRIPT="${REMOTE_SCRIPT//__REGION__/$REGION}"
 ENCODED="$(printf '%s' "$REMOTE_SCRIPT" | base64)"
 
 echo "Sending remote bootstrap to instance via SSM Run-Command..."
