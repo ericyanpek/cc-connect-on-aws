@@ -58,6 +58,7 @@
 | `fix-claude-bedrock-env.sh` | 给 systemd service 注入 Bedrock 环境变量（首次部署用过一次，已固化进 user-data，备用） |
 | `configure-models-and-admin.sh` | 配置模型白名单 + 锁定管理员 open_id（让 `/model switch` 可控、避免误切到非法 ID） |
 | `set-model.sh` | 命令行一键切换 Bedrock 模型（不进飞书的备用通道） |
+| `configure-autorestart.sh` | 把 systemd `Restart=on-failure` 升级成 `Restart=always` + 崩溃循环保护，让 daemon 任何退出都自动拉起 |
 
 ## 部署流程
 
