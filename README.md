@@ -52,13 +52,14 @@
 
 | 文件 | 作用 |
 |---|---|
-| `cc-connect-stack.yaml` | CloudFormation 模板：EC2 + IAM + SG + SSM Parameter |
+| `cc-connect-stack.yaml` | CloudFormation 模板：EC2 + IAM + SG + SSM Parameter；装 Claude Code/Codex/cc-connect（版本钉定），机型默认 m8i.2xlarge（参数化） |
 | `sync-github-config.sh` | 把本地 GitHub SSH key 与 git 全局配置同步到 EC2 |
-| `setup-feishu.sh` | 在 EC2 上写入飞书配置并启动 cc-connect daemon |
-| `fix-claude-bedrock-env.sh` | 给 systemd service 注入 Bedrock 环境变量（首次部署用过一次，已固化进 user-data，备用） |
-| `configure-models-and-admin.sh` | 配置模型白名单 + 锁定管理员 open_id（让 `/model switch` 可控、避免误切到非法 ID） |
-| `set-model.sh` | 命令行一键切换 Bedrock 模型（不进飞书的备用通道） |
+| `setup-codex.sh` | 写 `~/.codex/config.toml` + tavily MCP 包装脚本（tavily key 走 SSM）；**先于** setup-agents 运行 |
+| `setup-agents.sh` | 写**双 project** config.toml（Claude Code + Codex，各自飞书 App / 模型白名单 / 默认模型）并启动 daemon |
 | `configure-autorestart.sh` | 把 systemd `Restart=on-failure` 升级成 `Restart=always` + 崩溃循环保护，让 daemon 任何退出都自动拉起 |
+| `set-model.sh` | 命令行一键切换 Bedrock 模型（不进飞书的备用通道） |
+| `setup-feishu.sh` / `configure-models-and-admin.sh` | 旧的**单 project** 脚本（仅 Claude Code）。双 agent 部署请用上面的 `setup-codex.sh` + `setup-agents.sh` |
+| `fix-claude-bedrock-env.sh` | 给 systemd service 注入 Bedrock 环境变量（备用，已固化进 user-data） |
 
 ## 部署流程
 
@@ -112,17 +113,30 @@ aws cloudformation deploy \
 
 ### 4. 配置飞书并启动 daemon
 
+cc-connect 的模型是 **One process, multiple projects** —— 一个进程跑多个 project，每个 project 是「一个 agent + 一个飞书 App」的组合。本仓库示范两个 project：一个跑 **Claude Code**（走 Bedrock），一个跑 **Codex**（走 Bedrock Mantle），各用一个独立飞书 App，互不干扰。
+
+> 单 agent（只要 Claude Code）可以用旧脚本 `./setup-feishu.sh <app_id> <app_secret>`，更简单。下面是双 agent 流程。
+
+先把 Tavily key（给 Codex/Claude 的搜索 MCP 用）放进 SSM：
+
 ```bash
-./setup-feishu.sh <app_id> <app_secret> [project_name]
+aws ssm put-parameter --name /cc-connect/tavily-api-key \
+  --value "<你的 tavily key>" --type SecureString --region us-east-1
 ```
 
-脚本会：
-- 把飞书凭证经加密 SSM 参数上传，临时授权 EC2 读取
-- 在 EC2 上写 `~/.cc-connect/config.toml`
-- `cc-connect daemon install/start` 装成 systemd user service
-- 输出运行状态和日志尾部
+然后**先**配 Codex 侧（写 `~/.codex/config.toml` + Tavily MCP 包装），**再**写双 project 配置并启动：
 
-成功后会看到 `cc-connect is running projects=1` 和 `feishu: bot identified` 的日志。
+```bash
+./setup-codex.sh
+./setup-agents.sh <admin_open_id> <claude_app_id> <claude_app_secret> <codex_app_id> <codex_app_secret>
+```
+
+`setup-agents.sh` 会：
+- 把两个飞书 App 凭证经加密 SSM 参数上传，临时授权 EC2 读取，用完即删
+- 在 EC2 上写**双 project** `~/.cc-connect/config.toml`（含模型白名单、默认模型、`admin_from`/`allow_from`）
+- `cc-connect daemon install/restart`，输出状态和日志尾部
+
+成功后日志会出现 `cc-connect is running projects=2`，以及**两行** provider 激活：`claudecode: provider switched provider=bedrock` 和 `codex: provider switched provider=bedrock-mantle`（两行都出现才说明两个 agent 都正确激活了 provider，见下方「已知坑」）。
 
 ### 5. 在飞书里测试
 
@@ -138,33 +152,34 @@ hi
 帮我 clone https://github.com/chenhg5/cc-connect 到当前目录，简要分析整体架构
 ```
 
-### 6. 配置模型白名单 + 锁管理员（可选但强烈推荐）
+### 6. 模型白名单 + 锁管理员（已包含在 setup-agents.sh 里）
 
-默认配置下任何能找到 bot 的飞书用户都能给它发指令；模型用 `claude-opus-4-7` 这种短别名也容易触发 `400 invalid model identifier`。
+上面的 `setup-agents.sh` 已经把这些一并写好了——它需要你的 `admin_open_id`（在飞书里给任一 bot 发 `/whoami` 获取）：
 
-```bash
-./configure-models-and-admin.sh
-```
-
-先在飞书里给 bot 发 `/whoami` 拿到自己的 open_id，然后：
-
-```bash
-./configure-models-and-admin.sh ou_xxxxxxxxxxxxxxxx
-```
-
-执行后效果：
 - `[projects.platforms.options].allow_from` 限定为你 → 其他人发消息 bot 不响应
 - `[[projects]].admin_from` 限定为你 → 只有你能跑 `/model switch`、`/dir`、`/shell` 这类特权命令
-- 加入 6 个**已经在你账号上验证过能调通的** Bedrock 模型，并配上短别名
+- 给每个 agent 配一份**已在你账号上验证过能调通的** Bedrock 模型白名单 + 短别名。飞书里 `/model` 只显示白名单内的 alias，`/model switch <alias>` 也只能在白名单内切，避免把非法模型 ID 发给 Bedrock 触发 `400`。
 
-| 别名 | Bedrock inference profile |
+示例白名单（Claude Code 侧 8 个、Codex 侧 5 个，具体模型按你账号开通情况调整）：
+
+| Claude Code 别名 | Bedrock inference profile |
 |---|---|
-| `opus47` | `us.anthropic.claude-opus-4-7` |
-| `opus46` | `us.anthropic.claude-opus-4-6-v1` |
-| `opus45` | `us.anthropic.claude-opus-4-5-20251101-v1:0` |
-| `opus41` | `us.anthropic.claude-opus-4-1-20250805-v1:0` |
-| `sonnet45` | `us.anthropic.claude-sonnet-4-5-20250929-v1:0` |
-| `haiku45` | `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
+| `opus48` / `opus47` / `opus46` … | `us.anthropic.claude-opus-4-8` / `-4-7` / `-4-6-v1` … |
+| `sonnet45` / `haiku45` | `us.anthropic.claude-sonnet-4-5-…` / `-haiku-4-5-…` |
+
+#### 模型放哪、谁说了算（踩坑经验）
+
+cc-connect 决定 agent 启动用哪个模型时，优先级是：
+
+```
+active provider 段的 model  >  options.model  >  环境变量 ANTHROPIC_MODEL（实际不生效）
+```
+
+三个反直觉点，配置时务必记住：
+
+1. **provider 段的 `model` 会覆盖 `options.model`。** 如果你在 `[[projects.agent.providers]]` 里写了 `model`，那它才是真正的默认模型，`options.model` 会被无视。想让两者别打架，要么都写成同一个值，要么只在一处写。
+2. **`provider` 必须在 `[projects.agent.options]` 里显式指定**（如 `provider = "bedrock"` / `"bedrock-mantle"`）。否则 daemon 启动时不会激活任何 provider，飞书 `/model` 会显示一批默认模型而不是你的白名单。**自检**：启动日志里必须有 `<agent>: provider switched provider=<name>` 这一行。
+3. **环境变量里的 `ANTHROPIC_MODEL` 是死字段。** cc-connect 会自己用 config.toml 重建 agent 的模型环境，不透传宿主的 `ANTHROPIC_MODEL`。所以模型只该写在 config.toml 一处；`/etc/cc-connect.env` 只放 provider 接入（`CLAUDE_CODE_USE_BEDROCK` / `AWS_REGION` / `AWS_BEARER_TOKEN_BEDROCK`）。
 
 ## 已知坑（已自动处理）
 
@@ -175,6 +190,7 @@ hi
 | `AWS::EC2::SecurityGroup` 不写 `VpcId` 会报 `SecurityGroupEgress cannot be specified without VpcId` | 模板里把 `VpcId` 做成必填参数 |
 | `400 The provided model identifier is invalid` (例如直接用 `claude-opus-4-7`) | Claude Code CLI 短别名表落后于 Bedrock 实际可用模型；`configure-models-and-admin.sh` 把所有模型用完整 inference profile ID 注册到 `[[providers.models]]`，飞书里只能选白名单内的 alias |
 | `400 The provided model identifier is invalid (opus47)` —— alias 被当成模型 ID 发到 Bedrock | `[projects.agent.options].model` 的默认值**必须用完整 inference profile ID**（如 `us.anthropic.claude-opus-4-7`），alias（如 `opus47`）**只能用在 `/model switch <alias>` 命令里**，cc-connect 在那个上下文会做 alias→ID 查表替换 |
+| 飞书 `/model` 显示的是一批默认模型，不是你配的白名单 | 该 project 的 `[projects.agent.options]` 漏了 `provider = "..."`，daemon 启动没激活 provider（白名单挂在 provider 上）。补上 provider 行重启；自检启动日志有无 `provider switched` |
 
 ## 成本估算（us-east-1，按需）
 
