@@ -1,4 +1,7 @@
 #!/bin/bash
+echo "Archived script: see docs/deployment.md and docs/operations.md." >&2
+exit 1
+# Historical only: the normalized service already has its environment file.
 # Inject Bedrock env vars into the cc-connect systemd user service so Claude
 # Code (a subprocess) sees AWS_BEARER_TOKEN_BEDROCK and friends.
 set -euo pipefail

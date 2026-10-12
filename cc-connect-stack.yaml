@@ -1,14 +1,13 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: cc-connect on EC2 with Bedrock API key, accessed via SSM Session Manager (no inbound ports).
 
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+
 # IMPORTANT: Before deploying this stack, create the Bedrock API key SSM parameter
-# yourself (CloudFormation cannot create SecureString parameters):
-#
-#   aws ssm put-parameter \
-#     --name /cc-connect/bedrock-api-key \
-#     --value "<your bedrock api key>" \
-#     --type SecureString \
-#     --region us-east-1
+# yourself in Parameter Store (CloudFormation cannot create SecureString
+# parameters). Do not put the credential in this template or shell history.
 #
 # The instance role below grants read access to that parameter by ARN.
 
@@ -19,26 +18,27 @@ Parameters:
     Description: EC2 instance type (m8i.* is x86_64, same arch as t3 — no AMI change needed)
   CcConnectVersion:
     Type: String
-    Default: 1.3.3-beta.2
-    Description: >-
-      cc-connect npm version to pin. Pinned (not "latest") for reproducible
-      rebuilds. 1.3.3-beta.2 is the version validated on the original host.
+    Default: 1.5.0
+    Description: Official cc-connect npm release; keep aligned with versions.json
+  ClaudeCodeVersion:
+    Type: String
+    Default: 2.1.285
+    Description: '@anthropic-ai/claude-code npm version; verified 2026-09-30'
   CodexVersion:
     Type: String
-    Default: 0.136.0
+    Default: 0.159.2
     Description: '@openai/codex npm version to pin for the codex agent'
   VolumeSizeGiB:
     Type: Number
-    Default: 30
+    Default: 50
     Description: Root EBS volume size in GiB
   BedrockRegion:
     Type: String
     Default: us-east-1
-    Description: AWS region used by Claude Code / Codex to call Bedrock
-  # NOTE: model IDs are no longer template parameters. Model selection lives
-  # entirely in config.toml (per-project options.model + provider whitelist),
-  # written by setup-agents.sh. The old AnthropicModel / AnthropicSmallFastModel
-  # params were dead config (cc-connect doesn't read them) and were removed.
+    Description: AWS region used by Claude Code to call Bedrock
+  # Robot models belong to the active providers in ~/.cc-connect/config.toml.
+  # Codex has an isolated home and its own endpoint/credential configuration.
+  # This template bootstraps the host; it does not provision bot app credentials.
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: VPC to deploy into (use the default VPC)
@@ -90,6 +90,9 @@ Resources:
 
   Instance:
     Type: AWS::EC2::Instance
+    # Personal Feishu agents, maintained through SSM. Use official npm releases.
+    # UserData runs only on first boot; existing hosts need a separate SSM update.
+    # Keep credentials out of bootstrap logs and preserve project/session data.
     Properties:
       InstanceType: !Ref InstanceType
       ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
@@ -110,18 +113,17 @@ Resources:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
-          set -euxo pipefail
+          set -euo pipefail
+          umask 022
           exec > >(tee -a /var/log/cc-connect-userdata.log) 2>&1
 
-          # 1. Install Node.js 20, git, jq
-          curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
-          dnf install -y nodejs git jq
+          # 1. Use the verified Node.js 22 runtime.
+          curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
+          dnf install -y nodejs git jq python3.12
 
           # 2. Install Claude Code, Codex, and cc-connect globally.
-          #    cc-connect and Codex are version-pinned for reproducible rebuilds.
-          #    Claude Code intentionally tracks latest (Anthropic ships frequent,
-          #    backward-compatible CLI updates; pin it too if you want lockstep).
-          npm install -g @anthropic-ai/claude-code
+          #    Pin the versions verified together; update versions.json too.
+          npm install -g @anthropic-ai/claude-code@${ClaudeCodeVersion}
           npm install -g @openai/codex@${CodexVersion}
           npm install -g cc-connect@${CcConnectVersion}
 
@@ -130,53 +132,54 @@ Resources:
             --name /cc-connect/bedrock-api-key \
             --with-decryption \
             --region ${AWS::Region} \
-            --query Parameter.Value --output text || echo REPLACE_ME_AFTER_DEPLOY)"
+            --query Parameter.Value --output text)"
 
-          # /etc/profile.d for interactive shells. Restrict to root + ec2-user via group
-          # because the file embeds AWS_BEARER_TOKEN_BEDROCK; other local accounts (if any
-          # are ever added) shouldn't be able to read the token by tailing this file.
-          # NOTE: model selection is intentionally NOT set here. cc-connect rebuilds
-          # the provider/model env for its agent subprocesses from config.toml
-          # (ANTHROPIC_MODEL et al. are in its provider-managed env set and are not
-          # passed through from this file). Model lives in ONE place — config.toml's
-          # per-project options.model + provider whitelist. These files carry only
-          # provider *access* (which provider + credentials), never which model.
-          cat >/etc/profile.d/cc-connect.sh <<EOF
-          export CLAUDE_CODE_USE_BEDROCK=1
-          export AWS_REGION=${BedrockRegion}
-          export AWS_BEARER_TOKEN_BEDROCK="$API_KEY"
+          # Interactive access reads the same credential file without duplicating it.
+          cat >/etc/profile.d/cc-connect.sh <<'EOF'
+          if [ -r /etc/cc-connect.env ]; then
+              . /etc/cc-connect.env
+              export AWS_REGION AWS_BEARER_TOKEN_BEDROCK
+              export CLAUDE_CODE_USE_BEDROCK=1
+              unset CC_CODEX_BEDROCK_API_KEY
+          fi
           EOF
           chown root:ec2-user /etc/profile.d/cc-connect.sh
           chmod 640 /etc/profile.d/cc-connect.sh
 
-          # systemd EnvironmentFile so the cc-connect.service (and the Claude Code /
-          # Codex subprocesses) inherit Bedrock credentials without an interactive
-          # shell. Codex reads the same AWS_BEARER_TOKEN_BEDROCK (its config.toml
-          # provider sets env_key = "AWS_BEARER_TOKEN_BEDROCK") — no separate secret.
+          # Restrict permissions before writing credentials. The independent
+          # Codex Mantle credential is added when provisioning that agent.
+          install -m 640 -o root -g ec2-user /dev/null /etc/cc-connect.env
           cat >/etc/cc-connect.env <<EOF
-          CLAUDE_CODE_USE_BEDROCK=1
           AWS_REGION=${BedrockRegion}
           AWS_BEARER_TOKEN_BEDROCK=$API_KEY
           EOF
-          chmod 600 /etc/cc-connect.env
-          setfacl -m u:ec2-user:r /etc/cc-connect.env
+          unset API_KEY
 
-          # Drop-in extending cc-connect.service (created later by `cc-connect daemon install`)
-          sudo -u ec2-user mkdir -p /home/ec2-user/.config/systemd/user/cc-connect.service.d
-          cat >/home/ec2-user/.config/systemd/user/cc-connect.service.d/env.conf <<'EOF'
-          [Service]
-          EnvironmentFile=/etc/cc-connect.env
-          EOF
-
-          # Auto-restart on any exit (not just failure), with crash-loop guard.
-          cat >/home/ec2-user/.config/systemd/user/cc-connect.service.d/restart.conf <<'EOF'
+          # One service definition. Enable it only after provisioning bot config.
+          sudo -u ec2-user mkdir -p /home/ec2-user/.config/systemd/user
+          cat >/home/ec2-user/.config/systemd/user/cc-connect.service <<'EOF'
           [Unit]
+          Description=cc-connect official ${CcConnectVersion}
+          After=network-online.target
           StartLimitIntervalSec=300
           StartLimitBurst=10
 
           [Service]
+          Type=simple
+          ExecStart=/usr/bin/cc-connect --config /home/ec2-user/.cc-connect/config.toml
+          WorkingDirectory=/home/ec2-user/.cc-connect
+          EnvironmentFile=/etc/cc-connect.env
+          Environment="PATH=/home/ec2-user/.local/bin:/usr/local/bin:/usr/bin:/bin"
+          Environment="CODEX_HOME=/home/ec2-user/.cc-connect/agents/codex"
+          Environment="CC_LOG_FILE=/home/ec2-user/.cc-connect/logs/cc-connect.log"
+          Environment="CC_LOG_MAX_SIZE=10M"
           Restart=always
           RestartSec=5
+          KillMode=control-group
+          TimeoutStopSec=45
+
+          [Install]
+          WantedBy=default.target
           EOF
           chown -R ec2-user:ec2-user /home/ec2-user/.config
 
@@ -188,7 +191,7 @@ Resources:
           #    even when no interactive ec2-user session is logged in.
           loginctl enable-linger ec2-user
 
-          echo "cc-connect host bootstrap complete"
+          echo "cc-connect host bootstrap complete; provision bot configuration before starting service"
 
 Outputs:
   InstanceId:

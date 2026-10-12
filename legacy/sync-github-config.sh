@@ -1,4 +1,6 @@
 #!/bin/bash
+echo "Archived script: see docs/deployment.md and docs/operations.md." >&2
+exit 1
 # Sync local GitHub SSH key + git config to the cc-connect EC2 via SSM.
 #
 # Steps:

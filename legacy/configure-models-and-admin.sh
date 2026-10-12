@@ -1,4 +1,7 @@
 #!/bin/bash
+echo "Archived script: see docs/deployment.md and docs/operations.md." >&2
+exit 1
+# Historical only: old model/admin configuration. See ../README.md.
 # Add a verified Bedrock model whitelist + restrict bot access to admin user(s).
 #
 # After this:

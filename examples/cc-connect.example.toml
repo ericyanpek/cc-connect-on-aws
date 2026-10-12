@@ -1,0 +1,71 @@
+# Copy to /home/ec2-user/.cc-connect/config.toml; chmod 600.
+# Replace every REPLACE_* value. Feishu open_ids are scoped to each App.
+language = "zh"
+
+[log]
+level = "info"
+
+[[projects]]
+name = "my-project"
+admin_from = "REPLACE_CLAUDE_APP_OPEN_ID"
+
+[projects.agent]
+type = "claudecode"
+
+[projects.agent.options]
+work_dir = "/home/ec2-user/workspaces/projects"
+mode = "default"
+provider = "bedrock"
+
+[[projects.agent.providers]]
+name = "bedrock"
+model = "us.anthropic.claude-opus-5-5"
+env = { CLAUDE_CODE_USE_BEDROCK = "1", AWS_REGION = "us-east-1" }
+
+[[projects.agent.providers.models]]
+model = "us.anthropic.claude-opus-5-5"
+alias = "opus55"
+
+[[projects.platforms]]
+type = "feishu"
+
+[projects.platforms.options]
+app_id = "REPLACE_CLAUDE_APP_ID"
+app_secret = "REPLACE_CLAUDE_APP_SECRET"
+allow_from = "REPLACE_CLAUDE_APP_OPEN_ID"
+thread_isolation = true
+group_reply_all = false
+
+[[projects]]
+name = "codex"
+admin_from = "REPLACE_CODEX_APP_OPEN_ID"
+
+[projects.agent]
+type = "codex"
+
+[projects.agent.options]
+work_dir = "/home/ec2-user/workspaces/projects"
+mode = "auto-edit"
+backend = "app_server"
+app_server_url = "stdio"
+reasoning_effort = "medium"
+provider = "bedrock-mantle"
+codex_home = "/home/ec2-user/.cc-connect/agents/codex"
+
+[[projects.agent.providers]]
+name = "bedrock-mantle"
+model = "openai.gpt-6.1-sol"
+
+[[projects.agent.providers.models]]
+model = "openai.gpt-6.1-sol"
+alias = "sol61"
+
+[[projects.platforms]]
+type = "feishu"
+
+[projects.platforms.options]
+app_id = "REPLACE_CODEX_APP_ID"
+app_secret = "REPLACE_CODEX_APP_SECRET"
+allow_from = "REPLACE_CODEX_APP_OPEN_ID"
+thread_isolation = true
+group_reply_all = false
