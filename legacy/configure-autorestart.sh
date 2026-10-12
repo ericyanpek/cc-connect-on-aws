@@ -1,4 +1,7 @@
 #!/bin/bash
+echo "Archived script: see docs/deployment.md and docs/operations.md." >&2
+exit 1
+# Historical only: restart behavior is consolidated in the main service unit.
 # Make cc-connect.service auto-restart on any exit (not just failure),
 # with a sane crash-loop guard.
 set -euo pipefail

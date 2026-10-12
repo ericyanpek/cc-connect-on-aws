@@ -1,0 +1,8 @@
+{
+  "checked_on": "2026-10-12",
+  "integration_tested_on": "2026-09-30",
+  "cc-connect": "1.5.0",
+  "@anthropic-ai/claude-code": "2.1.285",
+  "@openai/codex": "0.159.2",
+  "node_major": 22
+}

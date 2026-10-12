@@ -1,4 +1,7 @@
 #!/bin/bash
+echo "Archived script: see docs/deployment.md and docs/operations.md." >&2
+exit 1
+# Historical only: rewrites configuration. Do not run on the normalized host.
 # Configure cc-connect with BOTH agents (Claude Code + Codex), each driven by its
 # own Feishu app, and start it as a daemon. This is the dual-project successor to
 # the older single-project setup-feishu.sh + configure-models-and-admin.sh pair.

@@ -10,6 +10,17 @@
 *.log
 .env
 .env.*
+!.env.example
+.kiro/
+
+# Host-specific configuration and local maintenance evidence
+config.toml
+auth.json
+*.local.toml
+docs/audit-*.md
+docs/calibration-*.md
+docs/codex-host-access-*.md
+backups/
 
 # Private keys / certs — never commit
 *.pem

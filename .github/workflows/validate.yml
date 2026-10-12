@@ -1,0 +1,28 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install cfn-lint
+      - name: Validate template
+        run: cfn-lint cc-connect-stack.yaml
+      - name: Validate scripts and configuration
+        run: |
+          python -m unittest discover -s tests -v
+          bash -n scripts/inspect-host.sh
+          shellcheck scripts/inspect-host.sh
+          for script in legacy/*.sh; do bash -n "$script"; done

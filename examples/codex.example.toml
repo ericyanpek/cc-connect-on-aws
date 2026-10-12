@@ -1,0 +1,14 @@
+# Copy to /home/ec2-user/.cc-connect/agents/codex/config.toml; chmod 600.
+# cc-connect owns the selected model. Do not duplicate it here.
+model_provider = "bedrock-mantle"
+sandbox_mode = "workspace-write"
+approval_policy = "never"
+
+[model_providers.bedrock-mantle]
+name = "Amazon Bedrock Mantle"
+base_url = "https://bedrock-mantle.us-west-2.api.aws/openai/v1"
+wire_api = "responses"
+env_key = "CC_CODEX_BEDROCK_API_KEY"
+
+[projects."/home/ec2-user/workspaces/projects"]
+trust_level = "trusted"

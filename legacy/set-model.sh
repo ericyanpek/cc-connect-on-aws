@@ -1,4 +1,7 @@
 #!/bin/bash
+echo "Archived script: see docs/deployment.md and docs/operations.md." >&2
+exit 1
+# Historical only: environment variables do not override active provider models.
 # Switch Claude Code's Bedrock model used by the cc-connect daemon.
 #
 # Usage:

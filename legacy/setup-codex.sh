@@ -1,4 +1,7 @@
 #!/bin/bash
+echo "Archived script: see docs/deployment.md and docs/operations.md." >&2
+exit 1
+# Historical only: rewrites shared Codex configuration. See ../README.md.
 # Provision the Codex agent's own config + MCP servers on the cc-connect host.
 # Run this BEFORE setup-agents.sh so ~/.codex/config.toml and the tavily wrapper
 # exist when the daemon starts the codex project.

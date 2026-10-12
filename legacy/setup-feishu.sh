@@ -1,4 +1,7 @@
 #!/bin/bash
+echo "Archived script: see docs/deployment.md and docs/operations.md." >&2
+exit 1
+# Historical only: replaces the dual-agent config with a single project.
 # Configure cc-connect with Feishu credentials and start it as a daemon.
 # Usage: ./setup-feishu.sh <app_id> <app_secret> [project_name]
 set -euo pipefail
